@@ -82,7 +82,8 @@ BBox 7,165–7,225 °O / 50,655–50,690 °N.
 | `data/koenigswinter/raster/dem_copernicus_glo30.tif` | Copernicus DEM GLO-30 (Zuschnitt) |
 | `data/koenigswinter/raster/landcover_esa_worldcover_10m.tif` | ESA WorldCover 2021 |
 | `data/koenigswinter/overture/*.geojson` | Overture Maps Release 2026-10-21.0: Gebäude, Landnutzung, Land, Wasser, Straßen |
-| `mockups/data/scene.json`, `landuse.png` | daraus abgeleitetes Szenenpaket (siehe `scripts/build_scene.py`) |
+| `mockups/data/<region>/scene.json`, `landuse.png`, `water.png` | daraus abgeleitetes Szenenpaket (siehe `scripts/build_scene.py`) |
+| `mockups/data/<region>/satellite.jpg` | Sentinel-2 L2A Echtfarbbild (10 m, wolkenarm, Sommer 2025), Zuschnitt per `scripts/fetch_sentinel2.py`; Szenen-ID in `satellite.json` |
 
 **Wichtige Einschränkung:** Die Cloud-Umgebung, in der das gebaut wurde, durfte nur AWS-Open-Data
 erreichen. Die amtlichen Server (opengeodata.nrw.de, Geoportale, OSM-Overpass) waren gesperrt.
@@ -94,5 +95,7 @@ lokal ausführen (bzw. die Umgebung für diese Hosts freischalten).
 
 - Höhe: © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt unter COPERNICUS durch die Europäische Union und ESA.
 - Landbedeckung: © ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021), CC BY 4.0.
+- Luftbild Stil D: Contains modified Copernicus Sentinel data 2025 (frei nutzbar, auch kommerziell).
+- Texturen (Fassaden, Dächer, Asphalt, Laub) werden im Browser selbst erzeugt (`mockups/textures.js`), keine fremden Bilder.
 - Gebäude/Straßen/Landnutzung: © Overture Maps Foundation; enthält Daten © OpenStreetMap-Mitwirkende (ODbL 1.0).
 - (später) Geobasisdaten NRW: dl-de/zero-2.0 – keine Nennung nötig, aber empfohlen: „© GeoBasis NRW“.

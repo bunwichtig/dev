@@ -7,7 +7,7 @@ const root = path.resolve('mockups');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.css': 'text/css' };
 const srv = http.createServer((q, r) => { const f = path.join(root, decodeURIComponent(q.url.split('?')[0]));
   fs.readFile(f, (e, d) => { if (e) { r.writeHead(404); r.end(); } else { r.writeHead(200, { 'content-type': types[path.extname(f)] || 'application/octet-stream' }); r.end(d); } }); }).listen(8765);
-const pages = (process.argv[2] || 'a-architekturmodell,b-lowpoly,c-semirealistisch').split(',');
+const pages = (process.argv[2] || 'a-architekturmodell,b-lowpoly,c-semirealistisch,d-realistisch').split(',');
 const regions = (process.argv[3] || 'pinnow,koenigswinter').split(',');
 const views = (process.argv[4] || 'overview,nah,top,walk').split(',');
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });

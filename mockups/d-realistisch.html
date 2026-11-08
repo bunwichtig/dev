@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mockup D – Realistisch</title><link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script></head>
+<body style="--bg:#c6d5e2"><div id="loading">Lade Szene …</div>
+<script type="module">
+import * as THREE from 'three';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, groundH, setupView, overlay, run, addMarker, hex, makeRenderer, QUALITY, params } from './common.js';
+import { facadeTexture, roofTexture, asphaltTexture, groundBump, foliageTexture } from './textures.js';
+const S = await loadScene();
+const sat = await new THREE.TextureLoader().loadAsync(S.base + 'satellite.jpg');
+let satInfo = {}; try { satInfo = await (await fetch(S.base + 'satellite.json')).json(); } catch (e) {}
+document.getElementById('loading').remove();
+const LOW = QUALITY.level === 'low', top = params.get('view') === 'top';
+const renderer = makeRenderer();
+if (renderer.shadowMap.enabled) renderer.shadowMap.type = QUALITY.level === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 5, 30000);
+
+// Himmel (Verlauf) – auch Quelle für Spiegelungen
+const skyMat = new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false,
+  vertexShader: 'varying vec3 v; void main(){ v = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
+  fragmentShader: 'varying vec3 v; void main(){ float t = clamp(v.y*1.4,0.,1.); vec3 c = mix(vec3(.84,.88,.92), vec3(.30,.52,.80), pow(t,.55)); gl_FragColor = vec4(c,1.); }' });
+const sky = new THREE.Mesh(new THREE.SphereGeometry(15000, 32, 16), skyMat); scene.add(sky);
+const pm = new THREE.PMREMGenerator(renderer), envScene = new THREE.Scene(); envScene.add(sky.clone());
+const envTex = pm.fromScene(envScene, 0.02).texture;
+if (!LOW) scene.environment = envTex;
+if (!top) scene.fog = new THREE.FogExp2('#cdd8e2', 0.0002);
+const Mat = (o) => LOW ? new THREE.MeshLambertMaterial(Object.fromEntries(Object.entries(o).filter(([k]) => !['roughness', 'metalness', 'bumpMap', 'bumpScale'].includes(k))))
+                       : new THREE.MeshStandardMaterial(o);
+
+// Gelände: echtes Sentinel-2-Luftbild als Textur, dazu feines Relief als Detail (zweiter UV-Kanal, 4-m-Kachel)
+sat.colorSpace = THREE.SRGBColorSpace; sat.anisotropy = 8;
+const terr = buildTerrain(S, { step: 10, color: () => [1, 1, 1] });
+const pos = terr.attributes.position, uv1 = new Float32Array(pos.count * 2);
+for (let i = 0; i < pos.count; i++) { uv1[i * 2] = pos.getX(i) / 4; uv1[i * 2 + 1] = pos.getZ(i) / 4; }
+terr.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2));
+const bump = groundBump(); bump.channel = 1;
+const tm = new THREE.Mesh(terr, Mat({ map: sat, roughness: 1, bumpMap: bump, bumpScale: 0.6 }));
+tm.receiveShadow = true; scene.add(tm);
+scene.add(new THREE.Mesh(buildSkirt(S, 60), new THREE.MeshLambertMaterial({ color: '#4b3f33', side: THREE.DoubleSide })));
+const water = new THREE.Mesh(buildWater(S), new (LOW ? THREE.MeshStandardMaterial : THREE.MeshPhysicalMaterial)(
+  { color: '#253f4a', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.9, envMap: envTex, envMapIntensity: 1.4 }));
+water.receiveShadow = true; scene.add(water);
+
+// Gebäude: Fassaden mit Fenstern (pro Achse und Geschoss), Ziegeldächer; Farben variieren je Haus
+const hsh = (b) => { let h = 0; for (let i = 0; i < 6 && i < b.r.length; i++) h = (h * 31 + (b.r[i] * 10 | 0)) | 0; return Math.abs(h); };
+const walls = ['#f0e9dc', '#e4d9c4', '#f6f1e8', '#ddcfb8', '#efe2cc', '#d8d1c4', '#c9a98b', '#e9e4da'].map(hex);
+const roofs = ['#a5442f', '#8d3a2a', '#6b625d', '#b4573c', '#4f4a47', '#7e3426'].map(hex);
+const geo = buildBuildings(S, { minH: 3, gable: true,
+  wallColor: b => /industrial|commercial|retail|warehouse/.test(b.c) ? hex('#c4c1bb') : walls[hsh(b) % walls.length],
+  roofColor: b => b.g ? roofs[hsh(b) % roofs.length] : hex('#7a7874') });
+const fac = facadeTexture(), roof = roofTexture();
+const bm = new THREE.Mesh(geo, [Mat({ vertexColors: true, map: fac, roughness: 0.9 }), Mat({ vertexColors: true, map: roof, roughness: 0.8 })]);
+bm.castShadow = bm.receiveShadow = true; scene.add(bm);
+
+// Straßen: Asphalt mit Randlinie, Wege/Bahn ohne Linie (über Farbe abgedunkelt bzw. aufgehellt)
+const minor = ['footway', 'path', 'track', 'cycleway', 'steps', 'pedestrian'];
+const rm = new THREE.Mesh(buildRoads(S, { lift: 0.45, width: r => r.c === 'steps' ? 0 : r.w,
+  color: r => hex(r.c === 'standard_gauge' ? '#6d655c' : minor.includes(r.c) ? '#b9ab90' : '#6e7073') }),
+  Mat({ vertexColors: true, map: asphaltTexture(), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }));
+rm.receiveShadow = true; scene.add(rm);
+
+// Bäume: zwei gekreuzte Billboards mit Laubtextur (sehr günstig, auch ohne Grafikkarte)
+const tp = treePositions(S, 0.6, 21);
+// vier einseitige Flächen (0°, 90°, 180°, 270°) statt doppelseitiger: so bleibt die Beleuchtung von beiden Seiten gleich
+const tg = new THREE.BufferGeometry();
+{ const P = [], U = [];
+  for (let k = 0; k < 4; k++) { const pl = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0).rotateY(k * Math.PI / 2).toNonIndexed();
+    P.push(...pl.attributes.position.array); U.push(...pl.attributes.uv.array); }
+  tg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); tg.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  // Normalen nach oben: Krone wird wie eine Kuppel beleuchtet, nicht je nach Blickseite dunkel
+  const nn = new Float32Array(P.length); for (let i = 0; i < nn.length; i += 3) nn[i + 1] = 1;
+  tg.setAttribute('normal', new THREE.BufferAttribute(nn, 3)); }
+const tmat = (LOW ? new THREE.MeshLambertMaterial({ map: foliageTexture(), alphaTest: 0.5 })
+                  : new THREE.MeshStandardMaterial({ map: foliageTexture(), alphaTest: 0.5, roughness: 1 }));
+const trees = new THREE.InstancedMesh(tg, tmat, tp.length);
+const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color(), up = new THREE.Vector3(0, 1, 0);
+let s = 5; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+tp.forEach(([x, y, k], i) => {
+  const size = 7 + k * 8 + rnd() * 5;
+  m4.compose(v.set(x, groundH(S, x, y) - 0.3, -y), q.setFromAxisAngle(up, rnd() * Math.PI), sc.set(size, size * (1.1 + rnd() * 0.3), size));
+  trees.setMatrixAt(i, m4); trees.setColorAt(i, c.setHSL(0.22 + rnd() * 0.08, 0.2 + rnd() * 0.25, 0.58 + rnd() * 0.32));
+});
+trees.castShadow = true; trees.receiveShadow = false; scene.add(trees);
+
+scene.add(new THREE.HemisphereLight('#d6e5f5', '#5a6040', LOW ? 1.4 : 0.8));
+const sun = new THREE.DirectionalLight('#fff0d8', LOW ? 2.2 : 3.0); sun.position.set(-1700, 1900, -1300); sun.castShadow = true;
+Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 7000 });
+sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.5; scene.add(sun);
+
+scene.userData.S = S;
+const ground = (x, y) => groundH(S, x, y);
+addMarker(scene, S, ground);
+const controls = setupView(renderer, camera, S);
+const hud = overlay(S, 'D · Realistisch (mit Texturen)', 'Echtes Satellitenbild (Sentinel-2, 10 m) als Boden, Fassaden mit Fenstern, Ziegeldächer, Asphalt, Laubbäume als Bildtafeln, spiegelnde Seen. Alle Texturen sind selbst erzeugt oder aus offenen Daten.', 'd-realistisch');
+hud.querySelector('small').insertAdjacentHTML('beforeend', `<br>Luftbild: ${satInfo.attribution || 'Contains modified Copernicus Sentinel data'}`);
+run(renderer, scene, camera, controls, ground, hud);
+</script></body></html>
