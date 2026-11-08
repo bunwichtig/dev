@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mockup A – Architekturmodell</title><link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script></head>
+<body style="--bg:#efede8"><div id="loading">Lade Szene …</div>
+<script type="module">
+import * as THREE from 'three';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, treePositions, heightAt, quantH, setupView, overlay, run, CAT, hex } from './common.js';
+const S = await loadScene();
+document.getElementById('loading').remove();
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#efede8');
+const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 10, 20000);
+
+// Stark abstrahiert: Höhenschichten wie aus Karton, alles monochrom, nur Wasser als Acrylglas
+const card = hex('#d9cbb0'), card2 = hex('#cbbb9c');
+const terr = buildTerrain(S, { step: 10, quant: 12, flat: true,
+  color: (k, h) => (Math.floor(h / 12) % 2 ? card : card2) });
+const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
+const tm = new THREE.Mesh(terr, mat); tm.receiveShadow = true; tm.castShadow = true; scene.add(tm);
+const sk = new THREE.Mesh(buildSkirt(S, 40), new THREE.MeshStandardMaterial({ color: '#b8a888', side: THREE.DoubleSide, roughness: 1 }));
+scene.add(sk);
+const water = new THREE.Mesh(new THREE.PlaneGeometry(S.size_m, S.size_m).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ color: '#a9c6d6', transparent: true, opacity: 0.85, roughness: 0.15 }));
+water.position.y = 2.5; scene.add(water);
+// Gebäude: weiße Blöcke, keine Dächer
+const bm = new THREE.Mesh(buildBuildings(S, { minH: 3, wallColor: () => [1, 1, 1], roofColor: () => [1, 1, 1] }),
+  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+bm.castShadow = bm.receiveShadow = true; scene.add(bm);
+// Straßen nur als feine helle Gravur (Hauptstraßen + Bahn)
+const main = { primary: 1, secondary: 1, tertiary: 1, residential: 1, standard_gauge: 1, trunk: 1, motorway: 1, unclassified: 1, living_street: 1 };
+const rm = new THREE.Mesh(buildRoads(S, { width: r => main[r.c] ? r.w * 0.8 : 0, color: () => hex('#f4efe4'), quant: 12, lift: 0.4 }),
+  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide }));
+rm.receiveShadow = true; scene.add(rm);
+// Bäume als abstrakte Kugeln (nur jeder zweite, wie Modellbau-Bäume)
+const tp = treePositions(S, 0.9, 7).filter((_, i) => i % 2 === 0);
+const tg = new THREE.IcosahedronGeometry(4, 1);
+const trees = new THREE.InstancedMesh(tg, new THREE.MeshStandardMaterial({ color: '#9aa58a', roughness: 0.9, flatShading: true }), tp.length);
+const m4 = new THREE.Matrix4();
+tp.forEach(([x, y, s], i) => { const h = quantH(S, x, y, 12); m4.makeScale(s, s, s).setPosition(x, h + 4 * s, -y); trees.setMatrixAt(i, m4); });
+trees.castShadow = true; scene.add(trees);
+
+scene.add(new THREE.HemisphereLight('#ffffff', '#b9ad96', 1.2));
+const sun = new THREE.DirectionalLight('#fff8ec', 2.4); sun.position.set(-1500, 2200, -900); sun.castShadow = true;
+Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 6000 });
+sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0005; scene.add(sun);
+
+const controls = setupView(renderer, camera, S, new URLSearchParams(location.search).get('view') || undefined);
+overlay(S, 'A · Architekturmodell (stark abstrahiert)', 'Höhenschichten in 12-m-Stufen, Gebäude als weiße Volumen, Bäume als Kugeln. Klar lesbar, zeitlos, geringe Datenansprüche – Fokus auf Form und Struktur statt Material.', 'a-architekturmodell.html');
+run(renderer, scene, camera, controls);
+</script></body></html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mockup B – Low-Poly</title><link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script></head>
+<body style="--bg:#bfe3f2"><div id="loading">Lade Szene …</div>
+<script type="module">
+import * as THREE from 'three';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, treePositions, heightAt, catAt, setupView, overlay, run, CAT, hex, mix } from './common.js';
+const S = await loadScene();
+document.getElementById('loading').remove();
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#bfe3f2'); if (new URLSearchParams(location.search).get('view') !== 'top') scene.fog = new THREE.Fog('#bfe3f2', 3500, 9000);
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 10, 20000);
+
+// Mittlere Abstraktion: grobe Facetten (25 m), kräftige Flächenfarben je Nutzung, Bäume als Low-Poly-Kegel
+const PAL = {
+  [CAT.unbekannt]: '#a8cf6a', [CAT.wasser]: '#4fa3d9', [CAT.wald]: '#3f8f46', [CAT.gebuesch]: '#6aa84f', [CAT.wiese]: '#a8cf6a',
+  [CAT.acker]: '#e3c96b', [CAT.obst_garten]: '#9cc25a', [CAT.park_sport]: '#8fd07a', [CAT.wohnen]: '#e9d8c4', [CAT.gewerbe]: '#e0c2d8',
+  [CAT.industrie]: '#cfcfd6', [CAT.fels]: '#b5a48f', [CAT.bahn]: '#c9b9a6', [CAT.oeffentlich]: '#f2d79c',
+};
+const P = Object.fromEntries(Object.entries(PAL).map(([k, v]) => [k, hex(v)]));
+const terr = buildTerrain(S, { step: 25, flat: true, color: (k) => P[k] });
+const tm = new THREE.Mesh(terr, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+tm.receiveShadow = true; scene.add(tm);
+scene.add(new THREE.Mesh(buildSkirt(S, 60, 25), new THREE.MeshLambertMaterial({ color: '#8a6a4a', side: THREE.DoubleSide })));
+const water = new THREE.Mesh(new THREE.PlaneGeometry(S.size_m, S.size_m).rotateX(-Math.PI / 2),
+  new THREE.MeshLambertMaterial({ color: '#4fa3d9', transparent: true, opacity: 0.9 }));
+water.position.y = 2.2; scene.add(water);
+
+// Gebäude: farbige Blöcke, Satteldach wo möglich, Farbe nach Gebäudeklasse
+const wall = (b) => hex(/industrial|commercial|retail|warehouse/.test(b.c) ? '#d8d2e6' : /school|church|public|civic/.test(b.c) ? '#f5e3b3' : '#fbf3e6');
+const roof = (b) => hex(b.g ? '#d9654b' : (/industrial|commercial|retail/.test(b.c) ? '#8b8fa3' : '#9a9a9a'));
+const bm = new THREE.Mesh(buildBuildings(S, { minH: 3, gable: true, wallColor: wall, roofColor: roof }),
+  new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+bm.castShadow = bm.receiveShadow = true; scene.add(bm);
+const roadW = { motorway: 1, trunk: 1, primary: 1, secondary: 1, tertiary: 1, residential: 1, unclassified: 1, living_street: 1, service: 1, pedestrian: 1, standard_gauge: 1 };
+const rm = new THREE.Mesh(buildRoads(S, { width: r => roadW[r.c] ? r.w : 0, lift: 1.2,
+  color: r => hex(r.c === 'standard_gauge' ? '#8d7b6a' : ['primary', 'secondary', 'trunk'].includes(r.c) ? '#f7f2e8' : '#e6ded0') }),
+  new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+rm.receiveShadow = true; scene.add(rm);
+
+// Bäume: Kegel (Nadel) und Ikosaeder (Laub), gemischt
+const tp = treePositions(S, 0.55, 3);
+const cone = new THREE.ConeGeometry(4, 12, 6).translate(0, 8, 0);
+const blob = new THREE.IcosahedronGeometry(5, 0).translate(0, 7, 0);
+const trunk = new THREE.CylinderGeometry(0.6, 0.8, 3, 5).translate(0, 1.5, 0);
+const mk = (g, c, n) => { const m = new THREE.InstancedMesh(g, new THREE.MeshLambertMaterial({ color: c, flatShading: true }), n); m.castShadow = true; scene.add(m); return m; };
+const cones = tp.filter((_, i) => i % 3 === 0), blobs = tp.filter((_, i) => i % 3 !== 0);
+const mC = mk(cone, '#2f6b3a', cones.length), mB = mk(blob, '#4f9a3f', blobs.length), mT = mk(trunk, '#7a5638', tp.length);
+const m4 = new THREE.Matrix4(), col = new THREE.Color();
+let ti = 0;
+const place = (mesh, arr) => arr.forEach(([x, y, s], i) => {
+  m4.makeScale(s, s * (0.9 + (i % 5) * 0.06), s).setPosition(x, heightAt(S, x, y) - 0.5, -y);
+  mesh.setMatrixAt(i, m4); mT.setMatrixAt(ti++, m4);
+  mesh.setColorAt(i, col.set(mesh.material.color).offsetHSL(((i * 7919) % 100) / 2000 - 0.025, 0, ((i * 104729) % 100) / 1000 - 0.05));
+});
+place(mC, cones); place(mB, blobs);
+
+scene.add(new THREE.HemisphereLight('#e8f6ff', '#6d8a4a', 1.4));
+const sun = new THREE.DirectionalLight('#fff1d6', 2.2); sun.position.set(-1600, 2000, -1100); sun.castShadow = true;
+Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 6000 });
+sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0008; scene.add(sun);
+
+const controls = setupView(renderer, camera, S, new URLSearchParams(location.search).get('view') || undefined);
+overlay(S, 'B · Low-Poly (stilisiert)', 'Facettiertes Gelände (25-m-Raster), kräftige Farben je Flächennutzung, Satteldächer, Bäume als einfache Körper. Freundlich, gut lesbar, performant – klassischer Spiele-Look.', 'b-lowpoly.html');
+run(renderer, scene, camera, controls);
+</script></body></html>
