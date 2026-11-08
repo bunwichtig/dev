@@ -19,3 +19,6 @@ canvas{display:block}
 .shot .hud .top,.shot .hud .btns,.shot .hud .help{display:none}
 .walking canvas{cursor:grab}
 @media (max-width:600px){.hud .desc,.hud small{display:none}}
+.hud .perf{display:flex;align-items:center;gap:10px;font-size:12.5px;margin:6px 0 0}
+.hud .perf #fps{color:#555;font-variant-numeric:tabular-nums}
+.shot .hud .perf{display:none}

@@ -5,13 +5,12 @@
 <body style="--bg:#c9d8e4"><div id="loading">Lade Szene …</div>
 <script type="module">
 import * as THREE from 'three';
-import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, groundH, setupView, overlay, run, addMarker, CAT, hex } from './common.js';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, groundH, setupView, overlay, run, addMarker, CAT, hex , makeRenderer, QUALITY } from './common.js';
 const S = await loadScene();
 document.getElementById('loading').remove();
 const top = new URLSearchParams(location.search).get('view') === 'top';
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const renderer = makeRenderer();
+if (renderer.shadowMap.enabled) renderer.shadowMap.type = QUALITY.level === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -23,7 +22,11 @@ const skyMat = new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: fals
   fragmentShader: 'varying vec3 v; void main(){ float t = clamp(v.y*1.6,0.,1.); vec3 c = mix(vec3(.86,.89,.92), vec3(.36,.56,.82), pow(t,.6)); gl_FragColor = vec4(c,1.); }' });
 const sky = new THREE.Mesh(new THREE.SphereGeometry(15000, 32, 16), skyMat); scene.add(sky);
 const pm = new THREE.PMREMGenerator(renderer); const envScene = new THREE.Scene(); envScene.add(sky.clone());
-scene.environment = pm.fromScene(envScene, 0.02).texture;
+const envTex = pm.fromScene(envScene, 0.02).texture;
+const LOW = QUALITY.level === 'low';
+// Im Sparmodus spiegelt nur das Wasser; alles andere nutzt einfachere Beleuchtung
+if (!LOW) scene.environment = envTex;
+const Mat = (o) => LOW ? new THREE.MeshLambertMaterial(Object.fromEntries(Object.entries(o).filter(([k]) => !['roughness', 'metalness', 'flatShading'].includes(k)))) : new THREE.MeshStandardMaterial(o);
 if (!top) scene.fog = new THREE.FogExp2('#cfd9e2', 0.00022);
 
 // Geländetextur: Landnutzung je 5-m-Zelle, mit Rauschen und Ackerstreifen (2,5 m/Pixel)
@@ -45,11 +48,11 @@ for (let y = 0; y < n * R; y++) for (let x = 0; x < n * R; x++) {
 g.putImageData(id, 0, 0); g.filter = 'blur(1px)'; g.drawImage(cv, 0, 0);
 const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
 const terr = buildTerrain(S, { step: 10, color: () => [1, 1, 1] });
-const tm = new THREE.Mesh(terr, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+const tm = new THREE.Mesh(terr, Mat({ map: tex, roughness: 0.95 }));
 tm.receiveShadow = true; scene.add(tm);
 scene.add(new THREE.Mesh(buildSkirt(S, 60), new THREE.MeshStandardMaterial({ color: '#4b3f33', side: THREE.DoubleSide, roughness: 1 })));
 const water = new THREE.Mesh(buildWater(S),
-  new THREE.MeshPhysicalMaterial({ color: '#2f4f5c', roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.92, envMapIntensity: 1.2 }));
+  new (LOW ? THREE.MeshStandardMaterial : THREE.MeshPhysicalMaterial)({ color: '#2f4f5c', roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.92, envMap: envTex, envMapIntensity: 1.2 }));
 water.receiveShadow = true; scene.add(water);
 
 // Gebäude: Putzfarben und Dachziegel mit Variation, Satteldächer
@@ -59,20 +62,20 @@ const roofs = ['#8e3b2c', '#7a3326', '#5b5552', '#9b4a35', '#474443', '#6e2f25']
 const bm = new THREE.Mesh(buildBuildings(S, { minH: 3, gable: true,
   wallColor: b => /industrial|commercial|retail|warehouse/.test(b.c) ? hex('#b9b6b0') : walls[hsh(b) % walls.length],
   roofColor: b => b.g ? roofs[hsh(b) % roofs.length] : hex('#6c6a66') }),
-  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+  Mat({ vertexColors: true, roughness: 0.85 }));
 bm.castShadow = bm.receiveShadow = true; scene.add(bm);
 // Straßen: Asphalt, Wege in Kies, Bahn als Schotterbett
 const rm = new THREE.Mesh(buildRoads(S, { lift: 0.5,
   width: r => r.c === 'steps' ? 0 : r.w,
   color: r => hex(r.c === 'standard_gauge' ? '#5d564f' : ['footway', 'path', 'track', 'cycleway'].includes(r.c) ? '#a79c86' : '#56585b') }),
-  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }));
+  Mat({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }));
 rm.receiveShadow = true; scene.add(rm);
 
 // Bäume: Stamm + Krone (zwei Kugeln), dicht, mit Größen- und Farbvariation
 const tp = treePositions(S, 0.75, 11);
 const crown = new THREE.IcosahedronGeometry(1, 1);
-const cm = new THREE.InstancedMesh(crown, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, flatShading: false }), tp.length * 2);
-const tr = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.4, 1, 5).translate(0, 0.5, 0), new THREE.MeshStandardMaterial({ color: '#4a3826' }), tp.length);
+const cm = new THREE.InstancedMesh(crown, Mat({ color: '#ffffff', roughness: 1, flatShading: false }), tp.length * 2);
+const tr = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.4, 1, 5).translate(0, 0.5, 0), Mat({ color: '#4a3826' }), tp.length);
 const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
 let j = 0;
 tp.forEach(([x, y, k], i) => {
@@ -89,7 +92,7 @@ cm.castShadow = tr.castShadow = true; cm.receiveShadow = true; scene.add(cm, tr)
 scene.add(new THREE.HemisphereLight('#cfe0f2', '#4b5a37', 0.9));
 const sun = new THREE.DirectionalLight('#ffe7c4', 3.2); sun.position.set(-1800, 1500, -1400); sun.castShadow = true;
 Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 7000 });
-sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.5; scene.add(sun);
+sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.5; scene.add(sun);
 
 scene.userData.S = S;
 const ground = (x, y) => groundH(S, x, y);

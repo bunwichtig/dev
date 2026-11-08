@@ -4,6 +4,34 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 
+// ---- Qualitätsstufe: ?q=low|mid|high, sonst automatisch.
+// Zeichnet der Browser ohne Grafikkarte (Software-Rendering), wird der Sparmodus gewählt.
+function detectSoftware() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+    if (!gl) return { soft: true, name: 'kein WebGL' };
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return { soft: /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i.test(name), name };
+  } catch (e) { return { soft: false, name: '?' }; }
+}
+const LEVELS = {
+  low:  { level: 'low',  label: 'Sparmodus', pixelRatio: 0.6, antialias: false, shadow: 0,    trees: 0.2, terrainStep: 2 },
+  mid:  { level: 'mid',  label: 'Mittel',    pixelRatio: 1,   antialias: true,  shadow: 2048, trees: 0.5, terrainStep: 1 },
+  high: { level: 'high', label: 'Hoch',      pixelRatio: 2,   antialias: true,  shadow: 4096, trees: 1,   terrainStep: 1 },
+};
+const _q = new URLSearchParams(location.search).get('q');
+const _gpu = detectSoftware();
+export const QUALITY = { ...LEVELS[LEVELS[_q] ? _q : (_gpu.soft ? 'low' : 'high')], auto: !LEVELS[_q], gpu: _gpu };
+
+export function makeRenderer() {
+  const r = new THREE.WebGLRenderer({ antialias: QUALITY.antialias, preserveDrawingBuffer: new URLSearchParams(location.search).has('shot'), powerPreference: 'high-performance' });
+  r.setPixelRatio(Math.min(devicePixelRatio, QUALITY.pixelRatio)); r.setSize(innerWidth, innerHeight);
+  r.shadowMap.enabled = QUALITY.shadow > 0;
+  return r;
+}
+
 export const CAT = {
   unbekannt: 0, wasser: 1, wald: 2, gebuesch: 3, wiese: 4, acker: 5, obst_garten: 6, park_sport: 7,
   wohnen: 8, gewerbe: 9, industrie: 10, fels: 11, bahn: 12, oeffentlich: 13,
@@ -89,7 +117,7 @@ export function catAt(S, x, y) {
 
 // Gelände als Gitter. opts: step (m), quant (Höhenstufen in m, 0 = glatt), color(cat, h, x, y) -> [r,g,b]
 export function buildTerrain(S, opts) {
-  const step = opts.step || 10, size = S.size_m, half = size / 2;
+  const step = (opts.step || 10) * QUALITY.terrainStep, size = S.size_m, half = size / 2;
   const n = Math.round(size / step);
   const geo = new THREE.PlaneGeometry(size, size, n, n);
   geo.rotateX(-Math.PI / 2);
@@ -217,7 +245,7 @@ export function treePositions(S, density, seed = 1) {
   const per = { [CAT.wald]: 1, [CAT.gebuesch]: 0.35, [CAT.obst_garten]: 0.25, [CAT.park_sport]: 0.05, [CAT.wohnen]: 0.03 };
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
     const f = per[S.lu[r * n + c]]; if (!f) continue;
-    const expect = f * density * res * res / 100;
+    const expect = f * density * QUALITY.trees * res * res / 100;
     let k = Math.floor(expect) + (rnd() < expect % 1 ? 1 : 0);
     while (k--) out.push([-half + (c + rnd()) * res, half - (r + rnd()) * res, 0.6 + rnd() * 0.8]);
   }
@@ -336,17 +364,22 @@ export function overlay(S, title, text, current) {
   const d = document.createElement('div');
   d.className = 'hud';
   const q = `?region=${region}`;
-  const links = VARIANTS.map(([h, t]) => h === current ? `<b>${t}</b>` : `<a href="${h}.html${q}">${t}</a>`).join(' · ');
+  const qq = q + (QUALITY.auto ? '' : '&q=' + QUALITY.level);
+  const links = VARIANTS.map(([h, t]) => h === current ? `<b>${t}</b>` : `<a href="${h}.html${qq}">${t}</a>`).join(' · ');
   const regs = Object.entries(REGIONS).map(([k, v]) => `<option value="${k}"${k === region ? ' selected' : ''}>${v}</option>`).join('');
   d.innerHTML = `<div class="top"><a href="index.html${q}" class="home">← Start</a>
     <select id="region" aria-label="Region">${regs}</select></div>
     <h1>${title}</h1><p class="desc">${text}</p><nav>${links}</nav>
     <div class="btns"><button data-view="overview">Übersicht</button><button data-view="nah">Marker nah</button>
       <button data-view="top">Draufsicht</button><button data-view="walk" class="walk">Zu Fuß ab Marker</button></div>
+    <div class="perf"><label>Grafik <select id="quality">${['auto', 'low', 'mid', 'high'].map(k => `<option value="${k}"${(QUALITY.auto ? 'auto' : QUALITY.level) === k ? ' selected' : ''}>${k === 'auto' ? `Automatisch (${QUALITY.label})` : { low: 'Sparmodus', mid: 'Mittel', high: 'Hoch' }[k]}</option>`).join('')}</select></label>
+      <span id="fps">– fps</span></div>
     <p class="help" id="help">Maus links: drehen · rechts: verschieben · Rad: zoomen</p>
     <small>${S.region} · ${S.size_m / 1000} × ${S.size_m / 1000} km · Marker: ${S.marker.label}<br>${S.attribution}</small>`;
   document.body.appendChild(d);
-  d.querySelector('#region').addEventListener('change', e => { location.search = `?region=${e.target.value}`; });
+  d.querySelector('#region').addEventListener('change', e => { location.search = `?region=${e.target.value}${QUALITY.auto ? '' : '&q=' + QUALITY.level}`; });
+  d.querySelector('#quality').addEventListener('change', e => {
+    const u = new URLSearchParams(location.search); e.target.value === 'auto' ? u.delete('q') : u.set('q', e.target.value); location.search = u.toString(); });
   return d;
 }
 
@@ -371,7 +404,21 @@ export function run(renderer, scene, camera, controls, groundFn, hud) {
   if (params.has('shot')) {
     document.body.classList.add('shot');
     walker.update(); renderer.render(scene, camera);
-  } else renderer.setAnimationLoop(() => { if (walker.on) walker.update(); else controls.update(); renderer.render(scene, camera); });
-  window.__ready = true; window.__cam = camera;
+  } else {
+    // Nur zeichnen, wenn sich etwas bewegt: spart im Stillstand die ganze Rechenleistung
+    let dirty = true, frames = 0, t0 = performance.now();
+    const fps = hud && hud.querySelector('#fps');
+    controls.addEventListener('change', () => { dirty = true; });
+    addEventListener('resize', () => { dirty = true; });
+    hud && hud.addEventListener('click', () => { dirty = true; });
+    renderer.setAnimationLoop(() => {
+      if (walker.on) { walker.update(); dirty = true; } else controls.update();
+      if (!dirty) { t0 = performance.now(); frames = 0; return; }
+      renderer.render(scene, camera); dirty = false; frames++; window.__frames = (window.__frames || 0) + 1;
+      const now = performance.now();
+      if (fps && now - t0 > 1000) { fps.textContent = `${Math.round(frames * 1000 / (now - t0))} fps`; t0 = now; frames = 0; }
+    });
+  }
+  window.__ready = true; window.__cam = camera; window.__dbg = { renderer, scene, camera };
 }
 const S_of = (scene) => scene.userData.S;

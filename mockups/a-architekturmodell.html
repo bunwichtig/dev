@@ -5,13 +5,12 @@
 <body style="--bg:#efede8"><div id="loading">Lade Szene …</div>
 <script type="module">
 import * as THREE from 'three';
-import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, quantH, setupView, overlay, run, addMarker, CAT, hex } from './common.js';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, quantH, setupView, overlay, run, addMarker, CAT, hex , makeRenderer, QUALITY } from './common.js';
 const S = await loadScene();
 const Q = S.relief > 150 ? 12 : 3; // Höhenstufe: im Flachland feiner
 document.getElementById('loading').remove();
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const renderer = makeRenderer();
+if (renderer.shadowMap.enabled) renderer.shadowMap.type = QUALITY.level === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color('#efede8');
 const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 10, 20000);
@@ -45,7 +44,7 @@ trees.castShadow = true; scene.add(trees);
 scene.add(new THREE.HemisphereLight('#ffffff', '#b9ad96', 1.2));
 const sun = new THREE.DirectionalLight('#fff8ec', 2.4); sun.position.set(-1500, 2200, -900); sun.castShadow = true;
 Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 6000 });
-sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0005; scene.add(sun);
+sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow); sun.shadow.bias = -0.0005; scene.add(sun);
 
 scene.userData.S = S;
 const ground = (x, y) => quantH(S, x, y, Q);

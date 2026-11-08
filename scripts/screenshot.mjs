@@ -16,7 +16,7 @@ for (const reg of regions) {
   for (const p of pages) for (const view of views) {
     const pg = await browser.newPage({ viewport: { width: 1600, height: 900 } });
     pg.on('console', m => m.type() === 'error' && console.log(p, m.text())); pg.on('pageerror', e => console.log(p, e.message));
-    await pg.goto(`http://localhost:8765/${p}.html?shot&region=${reg}&view=${view}`);
+    await pg.goto(`http://localhost:8765/${p}.html?shot&q=high&region=${reg}&view=${view}`);
     await pg.waitForFunction(() => window.__ready, null, { timeout: 240000 });
     await pg.waitForTimeout(1500);
     const out = `mockups/screenshots/${reg}/${p}-${view}.jpg`;

@@ -5,12 +5,10 @@
 <body style="--bg:#bfe3f2"><div id="loading">Lade Szene …</div>
 <script type="module">
 import * as THREE from 'three';
-import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, groundH, catAt, setupView, overlay, run, addMarker, CAT, hex, mix } from './common.js';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, groundH, catAt, setupView, overlay, run, addMarker, CAT, hex, mix , makeRenderer, QUALITY } from './common.js';
 const S = await loadScene();
 document.getElementById('loading').remove();
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true;
+const renderer = makeRenderer();
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#bfe3f2'); if (new URLSearchParams(location.search).get('view') !== 'top') scene.fog = new THREE.Fog('#bfe3f2', 3500, 9000);
@@ -61,7 +59,7 @@ place(mC, cones); place(mB, blobs);
 scene.add(new THREE.HemisphereLight('#e8f6ff', '#6d8a4a', 1.4));
 const sun = new THREE.DirectionalLight('#fff1d6', 2.2); sun.position.set(-1600, 2000, -1100); sun.castShadow = true;
 Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 6000 });
-sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0008; scene.add(sun);
+sun.shadow.mapSize.set(QUALITY.shadow, QUALITY.shadow); sun.shadow.bias = -0.0008; scene.add(sun);
 
 scene.userData.S = S;
 const ground = (x, y) => groundH(S, x, y);
