@@ -5,7 +5,7 @@
 <body style="--bg:#c9d8e4"><div id="loading">Lade Szene …</div>
 <script type="module">
 import * as THREE from 'three';
-import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, treePositions, heightAt, setupView, overlay, run, CAT, hex } from './common.js';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, groundH, setupView, overlay, run, addMarker, CAT, hex } from './common.js';
 const S = await loadScene();
 document.getElementById('loading').remove();
 const top = new URLSearchParams(location.search).get('view') === 'top';
@@ -48,9 +48,9 @@ const terr = buildTerrain(S, { step: 10, color: () => [1, 1, 1] });
 const tm = new THREE.Mesh(terr, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
 tm.receiveShadow = true; scene.add(tm);
 scene.add(new THREE.Mesh(buildSkirt(S, 60), new THREE.MeshStandardMaterial({ color: '#4b3f33', side: THREE.DoubleSide, roughness: 1 })));
-const water = new THREE.Mesh(new THREE.PlaneGeometry(S.size_m, S.size_m, 1, 1).rotateX(-Math.PI / 2),
+const water = new THREE.Mesh(buildWater(S),
   new THREE.MeshPhysicalMaterial({ color: '#2f4f5c', roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.92, envMapIntensity: 1.2 }));
-water.position.y = 2.2; water.receiveShadow = true; scene.add(water);
+water.receiveShadow = true; scene.add(water);
 
 // Gebäude: Putzfarben und Dachziegel mit Variation, Satteldächer
 const hsh = (b) => { let h = 0; for (let i = 0; i < 6 && i < b.r.length; i++) h = (h * 31 + (b.r[i] * 10 | 0)) | 0; return Math.abs(h); };
@@ -76,7 +76,7 @@ const tr = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.4, 1, 5).t
 const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
 let j = 0;
 tp.forEach(([x, y, k], i) => {
-  const h = heightAt(S, x, y), size = 3.2 + k * 3.2 + rnd() * 2, hh = size * (1.6 + rnd() * 0.6);
+  const h = groundH(S, x, y), size = 3.2 + k * 3.2 + rnd() * 2, hh = size * (1.6 + rnd() * 0.6);
   m4.compose(v.set(x, h - 0.5, -y), q.identity(), sc.set(size * 0.25, hh * 0.55, size * 0.25)); tr.setMatrixAt(i, m4);
   for (let p = 0; p < 2; p++) {
     const r = size * (p ? 0.7 : 1);
@@ -91,7 +91,10 @@ const sun = new THREE.DirectionalLight('#ffe7c4', 3.2); sun.position.set(-1800, 
 Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 7000 });
 sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.5; scene.add(sun);
 
-const controls = setupView(renderer, camera, S, new URLSearchParams(location.search).get('view') || undefined);
-overlay(S, 'C · Semi-realistisch', 'Glattes Gelände (10-m-Raster) mit Landnutzungs-Textur, Putz- und Ziegelfarben, dichte Bewaldung, spiegelndes Wasser, Dunst und Abendsonne. Am nächsten an der Wirklichkeit, braucht aber die genauesten Daten (DGM1, LoD2, Orthofotos).', 'c-semirealistisch.html');
-run(renderer, scene, camera, controls);
+scene.userData.S = S;
+const ground = (x, y) => groundH(S, x, y);
+addMarker(scene, S, ground);
+const controls = setupView(renderer, camera, S);
+const hud = overlay(S, 'C · Semi-realistisch', 'Glattes Gelände (10-m-Raster) mit Landnutzungs-Textur, Putz- und Ziegelfarben, dichte Bewaldung, spiegelndes Wasser, Dunst und Abendsonne. Am nächsten an der Wirklichkeit, braucht aber die genauesten Daten (DGM1, LoD2, Orthofotos).', 'c-semirealistisch');
+run(renderer, scene, camera, controls, ground, hud);
 </script></body></html>

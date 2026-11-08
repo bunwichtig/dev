@@ -1,0 +1,5 @@
+{"name": "Königswinter / Drachenfels (NRW)", "center": [7.195, 50.6725], "half_m": 1800,
+ "bbox": [7.165, 50.655, 7.225, 50.690],
+ "marker": {"lonlat": [7.2097, 50.6655], "label": "Drachenfels"},
+ "views": {"overview": {"target": [-900, 700, 55], "cam": [900, -900, 640]},
+           "nah": {"target": [-1142, 925, 12], "cam": [-772, 595, 180]}}}

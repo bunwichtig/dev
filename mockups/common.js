@@ -9,7 +9,8 @@ export const CAT = {
   wohnen: 8, gewerbe: 9, industrie: 10, fels: 11, bahn: 12, oeffentlich: 13,
 };
 
-export async function loadScene(base = './data/') {
+export async function loadScene(base) {
+  base = base || `./data/${new URLSearchParams(location.search).get('region') in { pinnow: 1, koenigswinter: 1 } ? new URLSearchParams(location.search).get('region') : 'pinnow'}/`;
   const scene = await (await fetch(base + 'scene.json')).json();
   const img = new Image();
   img.src = base + scene.landuse.file;
@@ -22,7 +23,13 @@ export async function loadScene(base = './data/') {
   const lu = new Uint8Array(c.width * c.height);
   for (let i = 0; i < lu.length; i++) lu[i] = px[i * 4];
   scene.lu = lu;
-  scene.h0 = scene.height.min - 2; // Bezugshöhe (knapp unter Rheinniveau)
+  const wimg = new Image(); wimg.src = base + scene.water.file; await wimg.decode();
+  g.clearRect(0, 0, c.width, c.height); g.drawImage(wimg, 0, 0);
+  const wp = g.getImageData(0, 0, c.width, c.height).data, wid = new Uint8Array(lu.length);
+  for (let i = 0; i < wid.length; i++) wid[i] = wp[i * 4];
+  scene.wid = wid;
+  scene.h0 = scene.height.min - 2; // Bezugshöhe (knapp unter dem tiefsten Punkt, meist Wasser)
+  scene.relief = scene.height.max - scene.height.min;
   return scene;
 }
 
@@ -37,8 +44,40 @@ export function heightAt(S, x, y) {
   return v - S.h0;
 }
 
+// Wasserspiegel (m über h0) an x, y oder null, wenn dort kein Wasser ist
+export function waterAt(S, x, y) {
+  const n = S.landuse.n, half = S.size_m / 2, res = S.landuse.res;
+  const c = Math.floor((x + half) / res), r = Math.floor((half - y) / res);
+  if (c < 0 || r < 0 || c >= n || r >= n) return null;
+  const k = S.wid[r * n + c];
+  return k ? S.water.levels[k] - S.h0 : null;
+}
+export const qfloor = (h, q) => Math.floor(h / q) * q;
+// Bodenhöhe im Terrassen-Stil (A)
 export function quantH(S, x, y, q) {
-  return catAt(S, x, y) === CAT.wasser ? 0 : Math.max(Math.floor(heightAt(S, x, y) / q) * q, 4);
+  const w = waterAt(S, x, y);
+  return w !== null ? qfloor(w, q) - 1.5 : qfloor(heightAt(S, x, y), q);
+}
+// Bodenhöhe im glatten Stil: Wasserflächen leicht unter dem Wasserspiegel
+export function groundH(S, x, y) {
+  const w = waterAt(S, x, y), h = heightAt(S, x, y);
+  return w !== null ? Math.min(h, w - 1.2) : h;
+}
+
+// Wasserflächen als Kacheln auf ihrem jeweiligen Spiegel. q = Terrassenstufe (0 = glatt)
+export function buildWater(S, q = 0, step = 10) {
+  const n = Math.round(S.size_m / step), half = S.size_m / 2, P = [];
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const x = -half + (c + 0.5) * step, y = half - (r + 0.5) * step;
+    let w = waterAt(S, x, y); if (w === null) continue;
+    w = q ? qfloor(w, q) + 0.4 : w;
+    const x0 = x - step / 2, x1 = x + step / 2, z0 = -(y + step / 2), z1 = -(y - step / 2);
+    P.push(x0, w, z0, x0, w, z1, x1, w, z1, x0, w, z0, x1, w, z1, x1, w, z0);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 export function catAt(S, x, y) {
@@ -57,11 +96,8 @@ export function buildTerrain(S, opts) {
   const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = -pos.getZ(i);
-    let h = heightAt(S, x, y);
-    // Wasserflächen leicht absenken, damit das Wasser sauber darüber liegt
     const k = catAt(S, x, y);
-    if (k === CAT.wasser) h = Math.min(h, 0.5);
-    if (opts.quant) h = k === CAT.wasser ? 0 : Math.max(Math.floor(h / opts.quant) * opts.quant, 4);
+    const h = opts.quant ? quantH(S, x, y, opts.quant) : groundH(S, x, y);
     pos.setY(i, h);
     const cc = opts.color(k, h, x, y);
     col[i * 3] = cc[0]; col[i * 3 + 1] = cc[1]; col[i * 3 + 2] = cc[2];
@@ -77,7 +113,7 @@ export function buildSkirt(S, depth, step = 10) {
   const half = S.size_m / 2, n = Math.round(S.size_m / step), verts = [];
   const edge = (fx) => { for (let i = 0; i < n; i++) {
     const [ax, ay] = fx(i / n), [bx, by] = fx((i + 1) / n);
-    const ha = heightAt(S, ax, ay), hb = heightAt(S, bx, by);
+    const ha = groundH(S, ax, ay), hb = groundH(S, bx, by);
     verts.push(ax, ha, -ay, bx, -depth, -by, bx, hb, -by, ax, ha, -ay, ax, -depth, -ay, bx, -depth, -by);
   } };
   edge(t => [-half + t * S.size_m, -half]);
@@ -158,7 +194,7 @@ export function buildRoads(S, opts) {
     for (let i = 0; i < n - 1; i++) {
       const x1 = p[i * 2], y1 = p[i * 2 + 1], x2 = p[i * 2 + 2], y2 = p[i * 2 + 3];
       const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L * w / 2, ny = dx / L * w / 2;
-      const hz = (x, y) => (opts.quant ? quantH(S, x, y, opts.quant) : heightAt(S, x, y)) + (opts.lift || 0.6);
+      const hz = (x, y) => (opts.quant ? quantH(S, x, y, opts.quant) : groundH(S, x, y)) + (opts.lift || 0.6);
       const h1 = hz(x1, y1), h2 = hz(x2, y2);
       const a = [x1 + nx, h1, -(y1 + ny)], b = [x1 - nx, h1, -(y1 - ny)], c = [x2 - nx, h2, -(y2 - ny)], d = [x2 + nx, h2, -(y2 + ny)];
       P.push(...a, ...b, ...c, ...a, ...c, ...d);
@@ -188,39 +224,154 @@ export function treePositions(S, density, seed = 1) {
   return out;
 }
 
-export function setupView(renderer, camera, S, preset = 'drachenfels') {
+export const params = new URLSearchParams(location.search);
+export const REGIONS = { pinnow: 'Pinnow bei Schwerin', koenigswinter: 'Königswinter / Drachenfels' };
+export const region = REGIONS[params.get('region')] ? params.get('region') : 'pinnow';
+
+// Kamerapositionen: relativ zum Marker in Metern [Ost, Nord, Höhe]; Region kann sie in scene.views überschreiben
+const DEFAULT_VIEWS = {
+  overview: { target: [-300, 300, 0], cam: [850, -1150, 430] },
+  nah: { target: [0, 0, 0], cam: [190, -260, 95] },
+};
+export function viewPose(S, name) {
+  const [mx, my] = S.marker.xy;
+  if (name === 'top') return { target: [0, 0, 0], cam: [0, -1, 6400] };
+  const v = (S.views && S.views[name]) || DEFAULT_VIEWS[name] || DEFAULT_VIEWS.overview;
+  const gt = heightAt(S, mx + v.target[0], my + v.target[1]);
+  return { target: [mx + v.target[0], my + v.target[1], gt + v.target[2]], cam: [mx + v.cam[0], my + v.cam[1], gt + v.cam[2]] };
+}
+export function applyView(camera, controls, S, name) {
+  const p = viewPose(S, name);
+  controls.target.set(p.target[0], p.target[2], -p.target[1]);
+  camera.position.set(p.cam[0], p.cam[2], -p.cam[1]);
+  controls.update();
+}
+export function setupView(renderer, camera, S, preset) {
   const controls = new OrbitControls(camera, renderer.domElement);
-  const [dx, dy] = S.poi.drachenfels;
-  // Blick vom Siebengebirge über den Rhein nach Nordwesten
-  controls.target.set(dx - 900, 60, -(dy + 700));
-  camera.position.set(dx + 900, 650, -(dy - 900));
-  if (preset === 'nah') { const [ax, ay] = S.poi.koenigswinter_altstadt;
-    controls.target.set(ax + 50, 20, -(ay - 50)); camera.position.set(ax + 420, 190, -(ay - 380)); }
-  if (preset === 'top') { controls.target.set(0, 0, 0); camera.position.set(0, 6400, 1); }
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.48;
-  controls.update();
+  applyView(camera, controls, S, preset || params.get('view') || 'overview');
   return controls;
+}
+
+// Marker (Stecknadel + Beschriftung). groundFn(x, y) liefert die Bodenhöhe im jeweiligen Stil.
+export function addMarker(scene, S, groundFn, color = '#d6332b') {
+  const [x, y] = S.marker.xy, h = groundFn(x, y);
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: color, emissiveIntensity: 0.25 });
+  const pin = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 0.3, 55, 10).translate(0, 27.5, 0), mat);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(7, 20, 14).translate(0, 60, 0), mat);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(9, 13, 40).rotateX(-Math.PI / 2).translate(0, 0.8, 0),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+  pin.castShadow = head.castShadow = true;
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 96;
+  const c = cv.getContext('2d');
+  c.fillStyle = 'rgba(255,255,255,.93)'; c.beginPath(); c.roundRect(4, 4, 504, 88, 18); c.fill();
+  c.fillStyle = '#1d1d1b'; c.font = '600 40px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(S.marker.label, 256, 50);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false }));
+  label.scale.set(0.15, 0.028, 1); label.position.set(0, 80, 0); label.renderOrder = 10;
+  g.add(pin, head, ring, label); g.position.set(x, h, -y);
+  scene.add(g);
+  return g;
+}
+
+// Laufmodus: WASD/Pfeiltasten bewegen, Maus ziehen schaut umher, Shift = rennen, Q/E = hoch/runter (Flug)
+export class Walker {
+  constructor(camera, dom, S, groundFn) {
+    Object.assign(this, { camera, dom, S, groundFn, on: false, yaw: 0, pitch: -0.05, keys: {}, fly: 0 });
+    this.last = performance.now();
+    addEventListener('keydown', e => { if (this.on && !e.target.closest('input,select')) { this.keys[e.code] = true; if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault(); } });
+    addEventListener('keyup', e => { this.keys[e.code] = false; });
+    let drag = null;
+    dom.addEventListener('pointerdown', e => { if (this.on) { drag = [e.clientX, e.clientY]; dom.setPointerCapture(e.pointerId); } });
+    dom.addEventListener('pointermove', e => { if (!this.on || !drag) return;
+      this.yaw -= (e.clientX - drag[0]) * 0.004; this.pitch = Math.max(-1.3, Math.min(1.3, this.pitch - (e.clientY - drag[1]) * 0.004)); drag = [e.clientX, e.clientY]; });
+    dom.addEventListener('pointerup', () => { drag = null; });
+  }
+  start(x, y) {
+    this.on = true; this.fly = 0;
+    const [mx, my] = this.S.marker.xy;
+    if (x === undefined) { // Start auf der nächsten Straße beim Marker, Blick zum Marker
+      let best = Infinity; x = mx - 20; y = my - 20;
+      for (const r of this.S.roads) {
+        if (['footway', 'path', 'steps', 'standard_gauge', 'track'].includes(r.c)) continue;
+        for (let i = 0; i < r.p.length; i += 2) {
+          const d = Math.hypot(r.p[i] - mx, r.p[i + 1] - my);
+          if (d > 30 && d < best) { best = d; x = r.p[i]; y = r.p[i + 1]; }
+        }
+      }
+    }
+    this.pos = new THREE.Vector3(x, 0, -y);
+    this.yaw = Math.atan2(-(mx - x), (my - y)); this.pitch = 0.12;
+    this.camera.near = 0.3; this.camera.updateProjectionMatrix();
+    this.last = performance.now();
+  }
+  stop() { this.on = false; this.camera.near = 5; this.camera.updateProjectionMatrix(); }
+  update() {
+    const now = performance.now(), dt = Math.min(0.1, (now - this.last) / 1000); this.last = now;
+    if (!this.on) return;
+    const k = this.keys, sp = (k.ShiftLeft || k.ShiftRight ? 18 : 5) * dt;
+    const f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
+    const r = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+    const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    this.pos.x += (fx * f - fz * r) * sp; this.pos.z += (fz * f + fx * r) * sp;
+    const half = this.S.size_m / 2 - 2;
+    this.pos.x = Math.max(-half, Math.min(half, this.pos.x)); this.pos.z = Math.max(-half, Math.min(half, this.pos.z));
+    this.fly = Math.max(0, this.fly + ((k.KeyE ? 1 : 0) - (k.KeyQ ? 1 : 0)) * sp * 2);
+    this.pos.y = this.groundFn(this.pos.x, -this.pos.z) + 1.7 + this.fly;
+    this.camera.position.copy(this.pos);
+    this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+  }
 }
 
 export const hex = (h) => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
 export const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
+export const VARIANTS = [
+  ['a-architekturmodell', 'A · Architekturmodell'], ['b-lowpoly', 'B · Low-Poly'], ['c-semirealistisch', 'C · Semi-realistisch']];
+
 export function overlay(S, title, text, current) {
   const d = document.createElement('div');
   d.className = 'hud';
-  const links = [['a-architekturmodell.html', 'A · Architekturmodell'], ['b-lowpoly.html', 'B · Low-Poly'], ['c-semirealistisch.html', 'C · Semi-realistisch']]
-    .map(([h, t]) => h === current ? `<b>${t}</b>` : `<a href="${h}">${t}</a>`).join(' · ');
-  d.innerHTML = `<h1>${title}</h1><p>${text}</p><nav>${links}</nav><small>${S.region} · Ausschnitt ${S.size_m / 1000} × ${S.size_m / 1000} km<br>${S.attribution}</small>`;
+  const q = `?region=${region}`;
+  const links = VARIANTS.map(([h, t]) => h === current ? `<b>${t}</b>` : `<a href="${h}.html${q}">${t}</a>`).join(' · ');
+  const regs = Object.entries(REGIONS).map(([k, v]) => `<option value="${k}"${k === region ? ' selected' : ''}>${v}</option>`).join('');
+  d.innerHTML = `<div class="top"><a href="index.html${q}" class="home">← Start</a>
+    <select id="region" aria-label="Region">${regs}</select></div>
+    <h1>${title}</h1><p class="desc">${text}</p><nav>${links}</nav>
+    <div class="btns"><button data-view="overview">Übersicht</button><button data-view="nah">Marker nah</button>
+      <button data-view="top">Draufsicht</button><button data-view="walk" class="walk">Zu Fuß ab Marker</button></div>
+    <p class="help" id="help">Maus links: drehen · rechts: verschieben · Rad: zoomen</p>
+    <small>${S.region} · ${S.size_m / 1000} × ${S.size_m / 1000} km · Marker: ${S.marker.label}<br>${S.attribution}</small>`;
   document.body.appendChild(d);
+  d.querySelector('#region').addEventListener('change', e => { location.search = `?region=${e.target.value}`; });
+  return d;
 }
 
-// Render-Schleife; mit ?shot wird nur ein Bild gerendert (für Screenshots / Software-Rendering)
-export function run(renderer, scene, camera, controls) {
+// Render-Schleife mit Ansichts-Buttons und Laufmodus; mit ?shot wird nur ein Bild gerendert (Screenshots)
+export function run(renderer, scene, camera, controls, groundFn, hud) {
   addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
-  if (new URLSearchParams(location.search).has('shot')) {
+  const walker = new Walker(camera, renderer.domElement, S_of(scene), groundFn || ((x, y) => heightAt(S_of(scene), x, y)));
+  const help = hud && hud.querySelector('#help');
+  const setWalk = (on) => {
+    if (on) { controls.enabled = false; walker.start(); document.body.classList.add('walking');
+      if (help) help.textContent = 'W A S D / Pfeile: gehen · Shift: rennen · Q / E: runter / hoch · Maus ziehen: umsehen · Esc: zurück'; }
+    else { walker.stop(); controls.enabled = true; document.body.classList.remove('walking');
+      if (help) help.textContent = 'Maus links: drehen · rechts: verschieben · Rad: zoomen'; }
+  };
+  hud && hud.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+    const v = b.dataset.view;
+    if (v === 'walk') return setWalk(!walker.on);
+    setWalk(false); applyView(camera, controls, S_of(scene), v);
+  }));
+  addEventListener('keydown', e => { if (e.code === 'Escape' && walker.on) setWalk(false); if (e.code === 'KeyF' && !e.target.closest('input,select')) setWalk(!walker.on); });
+  if (params.get('view') === 'walk') setWalk(true);
+  if (params.has('shot')) {
     document.body.classList.add('shot');
-    renderer.render(scene, camera);
-  } else renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
-  window.__ready = true;
+    walker.update(); renderer.render(scene, camera);
+  } else renderer.setAnimationLoop(() => { if (walker.on) walker.update(); else controls.update(); renderer.render(scene, camera); });
+  window.__ready = true; window.__cam = camera;
 }
+const S_of = (scene) => scene.userData.S;

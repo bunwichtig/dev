@@ -5,7 +5,7 @@
 <body style="--bg:#bfe3f2"><div id="loading">Lade Szene …</div>
 <script type="module">
 import * as THREE from 'three';
-import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, treePositions, heightAt, catAt, setupView, overlay, run, CAT, hex, mix } from './common.js';
+import { loadScene, buildTerrain, buildSkirt, buildBuildings, buildRoads, buildWater, treePositions, heightAt, groundH, catAt, setupView, overlay, run, addMarker, CAT, hex, mix } from './common.js';
 const S = await loadScene();
 document.getElementById('loading').remove();
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -27,9 +27,7 @@ const terr = buildTerrain(S, { step: 25, flat: true, color: (k) => P[k] });
 const tm = new THREE.Mesh(terr, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
 tm.receiveShadow = true; scene.add(tm);
 scene.add(new THREE.Mesh(buildSkirt(S, 60, 25), new THREE.MeshLambertMaterial({ color: '#8a6a4a', side: THREE.DoubleSide })));
-const water = new THREE.Mesh(new THREE.PlaneGeometry(S.size_m, S.size_m).rotateX(-Math.PI / 2),
-  new THREE.MeshLambertMaterial({ color: '#4fa3d9', transparent: true, opacity: 0.9 }));
-water.position.y = 2.2; scene.add(water);
+scene.add(new THREE.Mesh(buildWater(S), new THREE.MeshLambertMaterial({ color: '#4fa3d9', transparent: true, opacity: 0.92 })));
 
 // Gebäude: farbige Blöcke, Satteldach wo möglich, Farbe nach Gebäudeklasse
 const wall = (b) => hex(/industrial|commercial|retail|warehouse/.test(b.c) ? '#d8d2e6' : /school|church|public|civic/.test(b.c) ? '#f5e3b3' : '#fbf3e6');
@@ -54,7 +52,7 @@ const mC = mk(cone, '#2f6b3a', cones.length), mB = mk(blob, '#4f9a3f', blobs.len
 const m4 = new THREE.Matrix4(), col = new THREE.Color();
 let ti = 0;
 const place = (mesh, arr) => arr.forEach(([x, y, s], i) => {
-  m4.makeScale(s, s * (0.9 + (i % 5) * 0.06), s).setPosition(x, heightAt(S, x, y) - 0.5, -y);
+  m4.makeScale(s, s * (0.9 + (i % 5) * 0.06), s).setPosition(x, groundH(S, x, y) - 0.5, -y);
   mesh.setMatrixAt(i, m4); mT.setMatrixAt(ti++, m4);
   mesh.setColorAt(i, col.set(mesh.material.color).offsetHSL(((i * 7919) % 100) / 2000 - 0.025, 0, ((i * 104729) % 100) / 1000 - 0.05));
 });
@@ -65,7 +63,10 @@ const sun = new THREE.DirectionalLight('#fff1d6', 2.2); sun.position.set(-1600, 
 Object.assign(sun.shadow.camera, { left: -2600, right: 2600, top: 2600, bottom: -2600, near: 100, far: 6000 });
 sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0008; scene.add(sun);
 
-const controls = setupView(renderer, camera, S, new URLSearchParams(location.search).get('view') || undefined);
-overlay(S, 'B · Low-Poly (stilisiert)', 'Facettiertes Gelände (25-m-Raster), kräftige Farben je Flächennutzung, Satteldächer, Bäume als einfache Körper. Freundlich, gut lesbar, performant – klassischer Spiele-Look.', 'b-lowpoly.html');
-run(renderer, scene, camera, controls);
+scene.userData.S = S;
+const ground = (x, y) => groundH(S, x, y);
+addMarker(scene, S, ground);
+const controls = setupView(renderer, camera, S);
+const hud = overlay(S, 'B · Low-Poly (stilisiert)', 'Facettiertes Gelände (25-m-Raster), kräftige Farben je Flächennutzung, Satteldächer, Bäume als einfache Körper. Freundlich, gut lesbar, performant – klassischer Spiele-Look.', 'b-lowpoly');
+run(renderer, scene, camera, controls, ground, hud);
 </script></body></html>

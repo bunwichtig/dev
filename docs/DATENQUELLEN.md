@@ -68,7 +68,13 @@ Dachform, Bauweise. Damit lassen sich fehlende/neue Gebäude glaubwürdig ergän
 
 ## Was in diesem Repo gespeichert ist
 
-Beispielregion **Königswinter / Drachenfels mit Bonn-Bad Godesberg** (Rhein, Altstadt, Siebengebirge),
+**Hauptregion Pinnow bei Schwerin** (Mecklenburg-Vorpommern), Marker **Dorfstraße 2**. Die Adresse
+stammt aus dem Overture-Adressdatensatz (Koordinate 53,60295 °N / 11,54725 °O, Mitte der Hausnummern 2a–2d).
+Ausschnitt 3,6 × 3,6 km mit Pinnower See, Daten unter `data/pinnow/` (gleiche Quellen wie unten).
+Für MV gibt es amtliche Geobasisdaten (DGM, LoD2, DOP) beim LAiV M-V (GeoPortal.MV), die genaue Lizenz je Produkt
+muss dort noch geprüft werden; Bebauungspläne der Gemeinde Pinnow (Amt Crivitz) wären dort bzw. beim Amt zu prüfen.
+
+Zweite Region **Königswinter / Drachenfels mit Bonn-Bad Godesberg** (Rhein, Altstadt, Siebengebirge),
 BBox 7,165–7,225 °O / 50,655–50,690 °N.
 
 | Datei | Quelle |

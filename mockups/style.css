@@ -4,5 +4,18 @@ canvas{display:block}
   border-radius:10px;padding:12px 14px;color:#222;font-size:13px;line-height:1.45;box-shadow:0 2px 12px rgba(0,0,0,.12)}
 .hud h1{font-size:16px;margin:0 0 4px}.hud p{margin:0 0 6px}.hud nav{margin:6px 0}.hud a{color:#1d5fbf}
 .hud small{display:block;color:#666;font-size:10.5px;margin-top:6px}
-.shot .hud nav{display:none}
+.shot .hud{display:none}
 #loading{position:fixed;inset:0;display:grid;place-items:center;color:#555;font-size:14px}
+.hud .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.hud .home{font-weight:600;text-decoration:none}
+.hud select{font:inherit;font-size:12.5px;padding:3px 6px;border-radius:6px;border:1px solid #ccc;background:#fff;color:#222}
+.hud .btns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+.hud button{font:inherit;font-size:12.5px;padding:5px 10px;border-radius:6px;border:1px solid #c9c9c3;background:#fff;color:#222;cursor:pointer}
+.hud button:hover{background:#f1f1ec}.hud button:focus-visible{outline:2px solid #1d5fbf;outline-offset:1px}
+.hud button.walk{background:#1f5f46;color:#fff;border-color:#1f5f46}
+.walking .hud button.walk{background:#b8352c;border-color:#b8352c}
+.walking .hud button.walk::after{content:" beenden"}
+.hud .help{font-size:12px;color:#555;margin:4px 0 0}
+.shot .hud .top,.shot .hud .btns,.shot .hud .help{display:none}
+.walking canvas{cursor:grab}
+@media (max-width:600px){.hud .desc,.hud small{display:none}}

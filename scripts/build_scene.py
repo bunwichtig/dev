@@ -2,7 +2,9 @@
    mockups/data/scene.json  (Höhengitter, Gebäude, Straßen, Bäume)
    mockups/data/landuse.png (Kategorie-Raster, 8 bit, ein Wert pro Kategorie, siehe CATEGORIES)
 Koordinaten: lokale Meter (UTM32, Ursprung = BBox-Mitte), x = Ost, y = Nord.
-Aufruf: python scripts/build_scene.py data/koenigswinter mockups/data
+Aufruf: python scripts/build_scene.py <rohdaten> <ausgabe> <region.json>
+  region.json: {"name": "...", "center": [lon, lat], "half_m": 1800,
+                "marker": {"lonlat": [lon, lat], "label": "..."}, "views": {...optional}}
 """
 import sys, os, json, math, numpy as np, rasterio
 from rasterio.warp import reproject, Resampling
@@ -14,14 +16,12 @@ import warnings; warnings.filterwarnings("ignore")
 from shapely.ops import transform as stransform
 from PIL import Image
 
-src, out = sys.argv[1], sys.argv[2]
+src, out, cfgf = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg = json.load(open(cfgf))
 os.makedirs(out, exist_ok=True)
 tr = Transformer.from_crs(4326, 25832, always_xy=True)
-BBOX = (7.165, 50.655, 7.225, 50.690)
-x0, y0 = tr.transform(BBOX[0], BBOX[1]); x1, y1 = tr.transform(BBOX[2], BBOX[3])
-# quadratischer Ausschnitt 3,6 km um die Mitte
-cx, cy = round((x0 + x1) / 2), round((y0 + y1) / 2)
-HALF = 1800
+cx, cy = map(round, tr.transform(*cfg["center"]))
+HALF = cfg.get("half_m", 1800)
 minx, miny, maxx, maxy = cx - HALF, cy - HALF, cx + HALF, cy + HALF
 
 # Kategorien (Index im PNG)
@@ -78,6 +78,21 @@ for g, k, _ in shapes:
     m = rasterize([(mapping(g), 1)], out_shape=(M, M), transform=T5, fill=0, dtype=np.uint8)
     cat[m == 1] = C[k]
 Image.fromarray(cat, "L").save(f"{out}/landuse.png", optimize=True)
+
+# --- Wasserspiegel je zusammenhängender Wasserfläche (Seen liegen auf unterschiedlicher Höhe)
+from scipy.ndimage import label as cc_label, binary_opening
+dem5 = np.zeros((M, M), np.float32)
+with rasterio.open(f"{src}/raster/dem_copernicus_glo30.tif") as s_:
+    reproject(rasterio.band(s_, 1), dem5, dst_transform=T5, dst_crs="EPSG:25832", resampling=Resampling.bilinear)
+lab, nlab = cc_label(cat == C["wasser"])
+sizes = np.bincount(lab.ravel())
+order = [i for i in np.argsort(-sizes) if i != 0 and sizes[i] >= 4][:254]
+wid = np.zeros((M, M), np.uint8); levels = [0.0]
+for k, comp in enumerate(order, start=1):
+    m = lab == comp
+    wid[m] = k
+    levels.append(round(float(np.percentile(dem5[m], 15)), 2))
+Image.fromarray(wid, "L").save(f"{out}/water.png", optimize=True)
 
 loc = lambda g: stransform(lambda x, y, z=None: (round(x - cx, 1), round(y - cy, 1)), proj(g))
 clip = box(-HALF, -HALF, HALF, HALF)
@@ -142,13 +157,15 @@ for f in load("land"):
         if clip.contains(g): trees += [g.x, g.y]
 
 scene = {
-    "region": "Königswinter / Drachenfels (NRW)", "crs": "EPSG:25832", "origin_utm": [cx, cy],
+    "region": cfg["name"], "crs": "EPSG:25832", "origin_utm": [cx, cy],
     "size_m": 2 * HALF,
     "height": {"res": 10, "n": N + 1, "min": float(dem.min()), "max": float(dem.max()),
                "data": [round(float(v), 1) for v in dem.ravel()]},
     "landuse": {"res": 5, "n": M, "file": "landuse.png", "categories": CATEGORIES},
-    "poi": {"drachenfels": [round(a - b, 1) for a, b in zip(tr.transform(7.2097, 50.6655), (cx, cy))],
-            "koenigswinter_altstadt": [round(a - b, 1) for a, b in zip(tr.transform(7.1925, 50.6740), (cx, cy))]},
+    "water": {"file": "water.png", "levels": levels},
+    "marker": {"label": cfg["marker"]["label"],
+               "xy": [round(a - b, 1) for a, b in zip(tr.transform(*cfg["marker"]["lonlat"]), (cx, cy))]},
+    "views": cfg.get("views", {}),
     "buildings": blds, "roads": roads, "trees": trees,
     "attribution": "Höhe: Copernicus DEM GLO-30 © DLR e.V./Airbus, bereitgestellt unter COPERNICUS durch EU & ESA · "
                    "Landbedeckung: ESA WorldCover 2021 (CC BY 4.0) · Gebäude/Straßen/Landnutzung: Overture Maps "
