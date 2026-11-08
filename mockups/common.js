@@ -50,7 +50,7 @@ export async function loadScene(base) {
   const px = g.getImageData(0, 0, c.width, c.height).data;
   const lu = new Uint8Array(c.width * c.height);
   for (let i = 0; i < lu.length; i++) lu[i] = px[i * 4];
-  scene.lu = lu;
+  scene.lu = lu; scene.base = base;
   const wimg = new Image(); wimg.src = base + scene.water.file; await wimg.decode();
   g.clearRect(0, 0, c.width, c.height); g.drawImage(wimg, 0, 0);
   const wp = g.getImageData(0, 0, c.width, c.height).data, wid = new Uint8Array(lu.length);
@@ -156,69 +156,84 @@ export function buildSkirt(S, depth, step = 10) {
 
 // Gebäude als eine zusammengeführte Geometrie.
 // opts: heightScale, minH, gable (bool), wallColor(b)->[r,g,b], roofColor(b)->[r,g,b], baseOffset
+// UVs: Wände u = Meter entlang der Fassade / 3,5 (eine Fensterachse), v = Geschosse (3 m);
+// Dächer u/v = Meter (Satteldach: u entlang First, v quer). Gruppe 0 = Wände, Gruppe 1 = Dächer.
 export function buildBuildings(S, opts) {
-  const P = [], C = [];
-  const push = (x, y, z, c) => { P.push(x, y, -z); C.push(c[0], c[1], c[2]); };
-  let ref = [0, 0, 0]; // Punkt im Gebäudeinneren; Dreiecke werden so gedreht, dass die Normale nach außen zeigt
-  const tri = (a, b, c, col) => {
+  const W = { P: [], C: [], U: [] }, R = { P: [], C: [], U: [] };
+  let T = W, ref = [0, 0, 0]; // ref: Punkt im Gebäudeinneren, damit Normalen nach außen zeigen
+  const push = (p, c, uv) => { T.P.push(p[0], p[1], -p[2]); T.C.push(c[0], c[1], c[2]); T.U.push(uv[0], uv[1]); };
+  const tri = (a, b, c, col, ua, ub, uc) => {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; // Normale in (x, h, y_nord)
     const mx = (a[0] + b[0] + c[0]) / 3 - ref[0], my = (a[1] + b[1] + c[1]) / 3 - ref[1], mz = (a[2] + b[2] + c[2]) / 3 - ref[2];
     // Achtung: Spiegelung y_nord -> z = −y dreht die Orientierung um
-    if (nx * mx + ny * my + nz * mz > 0) { push(...a, col); push(...c, col); push(...b, col); }
-    else { push(...a, col); push(...b, col); push(...c, col); }
+    if (nx * mx + ny * my + nz * mz > 0) { push(a, col, ua); push(c, col, uc); push(b, col, ub); }
+    else { push(a, col, ua); push(b, col, ub); push(c, col, uc); }
   };
-  const quad = (a, b, c, d, col) => { tri(a, b, c, col); tri(a, c, d, col); };
+  const quad = (a, b, c, d, col, ua, ub, uc, ud) => { tri(a, b, c, col, ua, ub, uc); tri(a, c, d, col, ua, uc, ud); };
+  const BAY = 3.5, FLOOR = 3;
   for (const b of S.buildings) {
     const h = Math.max(opts.minH || 0, b.h * (opts.heightScale || 1));
-    const base = b.b - S.h0 - 1.5; // etwas in den Boden versenkt
-    const top = b.b - S.h0 + h;
+    const g0 = b.b - S.h0, base = g0 - 1.5; // etwas in den Boden versenkt
+    const top = g0 + h;
     const wc = opts.wallColor(b), rc = opts.roofColor(b);
+    const vb = (base - g0) / FLOOR, vt = h / FLOOR;
     { let sx = 0, sy = 0; const n = b.r.length / 2; for (let i = 0; i < n; i++) { sx += b.r[i * 2]; sy += b.r[i * 2 + 1]; }
       ref = b.g ? [b.g[0], (base + top) / 2, b.g[1]] : [sx / n, (base + top) / 2, sy / n]; }
+    const wall = (x1, y1, x2, y2, u0) => {
+      const u1 = u0 + Math.hypot(x2 - x1, y2 - y1) / BAY;
+      quad([x1, base, y1], [x2, base, y2], [x2, top, y2], [x1, top, y1], wc, [u0, vb], [u1, vb], [u1, vt], [u0, vt]);
+      return u1;
+    };
+    T = W;
     if (opts.gable && b.g) {
-      const [mx, my, L, W, a] = b.g, ca = Math.cos(a), sa = Math.sin(a);
+      const [mx, my, L, Wd, a] = b.g, ca = Math.cos(a), sa = Math.sin(a);
       const pt = (u, v) => [mx + u * ca - v * sa, my + u * sa + v * ca];
-      const l = L / 2, w = W / 2, ridge = top + W * 0.45;
+      const l = L / 2, w = Wd / 2, ridge = top + Wd * 0.45;
       const c4 = [pt(-l, -w), pt(l, -w), pt(l, w), pt(-l, w)];
-      for (let i = 0; i < 4; i++) {
-        const [x1, y1] = c4[i], [x2, y2] = c4[(i + 1) % 4];
-        quad([x1, base, y1], [x2, base, y2], [x2, top, y2], [x1, top, y1], wc);
-      }
-      const r1 = pt(-l, 0), r2 = pt(l, 0);
+      let u = 0;
+      for (let i = 0; i < 4; i++) { const [x1, y1] = c4[i], [x2, y2] = c4[(i + 1) % 4]; u = wall(x1, y1, x2, y2, Math.round(u)); }
+      const r1 = pt(-l, 0), r2 = pt(l, 0), vr = (ridge - g0) / FLOOR, ww = Wd / BAY;
       // Giebeldreiecke
-      tri([c4[1][0], top, c4[1][1]], [c4[2][0], top, c4[2][1]], [r2[0], ridge, r2[1]], wc);
-      tri([c4[3][0], top, c4[3][1]], [c4[0][0], top, c4[0][1]], [r1[0], ridge, r1[1]], wc);
-      // Dachflächen (leichter Überstand)
+      tri([c4[1][0], top, c4[1][1]], [c4[2][0], top, c4[2][1]], [r2[0], ridge, r2[1]], wc, [0, vt], [ww, vt], [ww / 2, vr]);
+      tri([c4[3][0], top, c4[3][1]], [c4[0][0], top, c4[0][1]], [r1[0], ridge, r1[1]], wc, [0, vt], [ww, vt], [ww / 2, vr]);
+      // Dachflächen (leichter Überstand); UV: u entlang First, v Abstand vom First (schräg, in m)
+      T = R;
       const o = 0.5, e = (p, q, f) => [p[0] + (p[0] - q[0]) * f, p[1] + (p[1] - q[1]) * f];
-      const c0 = e(c4[0], c4[3], o / W), c1 = e(c4[1], c4[2], o / W), c2 = e(c4[2], c4[1], o / W), c3 = e(c4[3], c4[0], o / W);
-      const dz = W * 0.45 * (o / w);
-      quad([c0[0], top - dz, c0[1]], [c1[0], top - dz, c1[1]], [r2[0], ridge, r2[1]], [r1[0], ridge, r1[1]], rc);
-      quad([c2[0], top - dz, c2[1]], [c3[0], top - dz, c3[1]], [r1[0], ridge, r1[1]], [r2[0], ridge, r2[1]], rc);
+      const c0 = e(c4[0], c4[3], o / Wd), c1 = e(c4[1], c4[2], o / Wd), c2 = e(c4[2], c4[1], o / Wd), c3 = e(c4[3], c4[0], o / Wd);
+      const dz = Wd * 0.45 * (o / w), slope = Math.hypot(w + o, Wd * 0.45 + dz);
+      quad([c0[0], top - dz, c0[1]], [c1[0], top - dz, c1[1]], [r2[0], ridge, r2[1]], [r1[0], ridge, r1[1]], rc, [0, slope], [L, slope], [L, 0], [0, 0]);
+      quad([c2[0], top - dz, c2[1]], [c3[0], top - dz, c3[1]], [r1[0], ridge, r1[1]], [r2[0], ridge, r2[1]], rc, [L, slope], [0, slope], [0, 0], [L, 0]);
       continue;
     }
     const r = b.r, n = r.length / 2;
+    let u = 0;
     for (let i = 0; i < n; i++) {
       const x1 = r[i * 2], y1 = r[i * 2 + 1], x2 = r[((i + 1) % n) * 2], y2 = r[((i + 1) % n) * 2 + 1];
-      quad([x1, base, y1], [x2, base, y2], [x2, top, y2], [x1, top, y1], wc);
+      u = wall(x1, y1, x2, y2, Math.round(u));
     }
+    T = R;
     const pts = []; for (let i = 0; i < n; i++) pts.push(new THREE.Vector2(r[i * 2], r[i * 2 + 1]));
     const faces = THREE.ShapeUtils.triangulateShape(pts, []);
-    for (const [a, bb, c] of faces) { ref = [pts[a].x, top - 5, pts[a].y]; tri([pts[a].x, top, pts[a].y], [pts[bb].x, top, pts[bb].y], [pts[c].x, top, pts[c].y], rc); }
+    for (const [a, bb, c] of faces) { ref = [pts[a].x, top - 5, pts[a].y];
+      tri([pts[a].x, top, pts[a].y], [pts[bb].x, top, pts[bb].y], [pts[c].x, top, pts[c].y], rc, [pts[a].x, pts[a].y], [pts[bb].x, pts[bb].y], [pts[c].x, pts[c].y]); }
   }
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+  g.setAttribute('position', new THREE.Float32BufferAttribute(W.P.concat(R.P), 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(W.C.concat(R.C), 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(W.U.concat(R.U), 2));
+  g.addGroup(0, W.P.length / 3, 0); g.addGroup(W.P.length / 3, R.P.length / 3, 1);
   g.computeVertexNormals();
   return g;
 }
 
 // Straßen als auf das Gelände gelegte Bänder. opts: width(road)->m|0, color(road)->[r,g,b], lift, quant
 export function buildRoads(S, opts) {
-  const P = [], C = [];
+  const P = [], C = [], UV = [];
   for (const rd of S.roads) {
     const w = opts.width(rd); if (!w) continue;
     const col = opts.color(rd), p = rd.p, n = p.length / 2;
+    let vacc = 0;
     for (let i = 0; i < n - 1; i++) {
       const x1 = p[i * 2], y1 = p[i * 2 + 1], x2 = p[i * 2 + 2], y2 = p[i * 2 + 3];
       const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L * w / 2, ny = dx / L * w / 2;
@@ -227,10 +242,13 @@ export function buildRoads(S, opts) {
       const a = [x1 + nx, h1, -(y1 + ny)], b = [x1 - nx, h1, -(y1 - ny)], c = [x2 - nx, h2, -(y2 - ny)], d = [x2 + nx, h2, -(y2 + ny)];
       P.push(...a, ...b, ...c, ...a, ...c, ...d);
       for (let k = 0; k < 6; k++) C.push(...col);
+      const v1 = vacc / w, v2 = (vacc += L) / w; // UV: u quer (0..1), v entlang in Straßenbreiten
+      UV.push(0, v1, 1, v1, 1, v2, 0, v1, 1, v2, 0, v2);
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
   g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
   g.computeVertexNormals();
   return g;
@@ -358,7 +376,7 @@ export const hex = (h) => { const c = new THREE.Color(h); return [c.r, c.g, c.b]
 export const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 export const VARIANTS = [
-  ['a-architekturmodell', 'A · Architekturmodell'], ['b-lowpoly', 'B · Low-Poly'], ['c-semirealistisch', 'C · Semi-realistisch']];
+  ['a-architekturmodell', 'A · Architekturmodell'], ['b-lowpoly', 'B · Low-Poly'], ['c-semirealistisch', 'C · Semi-realistisch'], ['d-realistisch', 'D · Realistisch']];
 
 export function overlay(S, title, text, current) {
   const d = document.createElement('div');

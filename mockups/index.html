@@ -13,7 +13,7 @@ h1{font-size:clamp(24px,3.4vw,34px);margin:0;text-wrap:balance}
 .region{display:flex;gap:6px;flex-wrap:wrap}
 .region button{font:inherit;font-size:14px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
 .region button[aria-pressed="true"]{background:var(--acc);border-color:var(--acc);color:#fff}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
 .card img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:var(--line)}
 .card .thumbs{display:grid;grid-template-columns:1fr 1fr;gap:2px;margin-top:2px}
@@ -30,19 +30,20 @@ footer a{color:var(--acc2)}
 @media (max-width:900px){.grid{grid-template-columns:1fr}}
 </style></head><body><main>
 <header><div><h1>Wähle den Grafikstil</h1>
-<p class="lead" id="lead">Alle drei Stile zeigen dieselbe echte Landschaft aus freien Daten. Öffne einen Stil, schau dich um oder lauf ab dem Marker zu Fuß los.</p></div>
+<p class="lead" id="lead">Alle vier Stile zeigen dieselbe echte Landschaft aus freien Daten. Öffne einen Stil, schau dich um oder lauf ab dem Marker zu Fuß los.</p></div>
 <div class="region" role="group" aria-label="Region">
 <button data-region="pinnow" aria-pressed="true">Pinnow bei Schwerin</button>
 <button data-region="koenigswinter" aria-pressed="false">Königswinter / Drachenfels</button></div></header>
 <div class="grid" id="grid"></div>
 <footer>Steuerung im Stil: Maus links drehen, rechts verschieben, Rad zoomen. „Zu Fuß“: W A S D oder Pfeile, Shift rennt, Q/E runter/hoch, Maus ziehen zum Umsehen, Esc beendet.<br>
-Höhe: © DLR e.V./Airbus, bereitgestellt unter COPERNICUS durch EU und ESA · Landbedeckung: ESA WorldCover 2021, CC BY 4.0 · Gebäude, Straßen, Adressen: © Overture Maps Foundation, enthält Daten © OpenStreetMap-Mitwirkende (ODbL). Details: <a href="../docs/DATENQUELLEN.md">Datenquellen</a></footer>
+Höhe: © DLR e.V./Airbus, bereitgestellt unter COPERNICUS durch EU und ESA · Landbedeckung: ESA WorldCover 2021, CC BY 4.0 · Luftbild (Stil D): enthält veränderte Copernicus-Sentinel-Daten 2025 · Gebäude, Straßen, Adressen: © Overture Maps Foundation, enthält Daten © OpenStreetMap-Mitwirkende (ODbL). Details: <a href="../docs/DATENQUELLEN.md">Datenquellen</a></footer>
 </main>
 <script>
 const STYLES = [
   ['a-architekturmodell', 'Stil A · stark abstrahiert', 'Architekturmodell', 'Höhenschichten wie Karton, weiße Gebäudevolumen, Kugelbäume. Ruhig und zeitlos, verzeiht ungenaue Daten.'],
   ['b-lowpoly', 'Stil B · stilisiert', 'Low-Poly', 'Facettiertes Gelände, kräftige Farben je Nutzung, rote Satteldächer. Freundlicher Spiele-Look, läuft am flüssigsten.'],
-  ['c-semirealistisch', 'Stil C · realitätsnah', 'Semi-realistisch', 'Texturiertes Gelände, Putz- und Ziegelfarben, dichter Wald, spiegelndes Wasser. Wirkt am echtesten, zeigt aber jede Datenlücke.'],
+  ['c-semirealistisch', 'Stil C · realitätsnah', 'Semi-realistisch', 'Eingefärbtes Gelände, Putz- und Ziegelfarben, dichter Wald, spiegelndes Wasser. Nah an der Wirklichkeit, aber ohne echte Bilder.'],
+  ['d-realistisch', 'Stil D · mit Texturen', 'Realistisch', 'Echtes Satellitenbild als Boden, Fassaden mit Fenstern, Ziegeldächer, Asphalt, Laubbäume. Am nächsten am echten Ort.'],
 ];
 const MARK = { pinnow: 'Marker: Dorfstraße 2, Pinnow', koenigswinter: 'Marker: Drachenfels' };
 let region = 'pinnow';
